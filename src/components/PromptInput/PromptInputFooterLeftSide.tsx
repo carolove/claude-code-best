@@ -30,13 +30,17 @@ import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
 import { TeamStatus } from '../teams/TeamStatus.js';
 import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js';
 import { useAppState, useAppStateStore } from 'src/state/AppState.js';
-import { getIsRemoteMode } from '../../bootstrap/state.js';
+import { getCurrentUsage } from '../../utils/tokens.js';
+import { calculateContextPercentages, getContextWindowForModel } from '../../utils/context.js';
+import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
+import { getIsRemoteMode, getSdkBetas } from '../../bootstrap/state.js';
 import HistorySearchInput from './HistorySearchInput.js';
 import { usePrStatus } from '../../hooks/usePrStatus.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
 import { formatDuration, formatFileSize } from '../../utils/format.js';
+import type { Message } from '../../types/message.js';
 import { VoiceWarmupHint } from './VoiceIndicator.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
 import { useVoiceState } from '../../context/voice.js';
@@ -74,6 +78,23 @@ function useRssDisplay(): RssState | null {
   return state;
 }
 
+type CtxState = { text: string; level: 'normal' | 'warning' | 'error' };
+
+function useContextDisplay(messages: Message[]): CtxState | null {
+  const model = useMainLoopModel();
+  const currentUsage = useMemo(() => getCurrentUsage(messages), [messages]);
+  const contextWindowSize = useMemo(() => getContextWindowForModel(model, getSdkBetas()), [model]);
+  const percentages = useMemo(
+    () => calculateContextPercentages(currentUsage, contextWindowSize),
+    [currentUsage, contextWindowSize],
+  );
+
+  if (!currentUsage || percentages.used === null) return null;
+  const pct = percentages.used;
+  const level = pct >= 90 ? 'error' : pct >= 70 ? 'warning' : 'normal';
+  return { text: `ctx:${pct}%`, level };
+}
+
 type Props = {
   exitMessage: {
     show: boolean;
@@ -84,6 +105,7 @@ type Props = {
   toolPermissionContext: ToolPermissionContext;
   suppressHint: boolean;
   isLoading: boolean;
+  messages: Message[];
   showMemoryTypeSelector?: boolean;
   tasksSelected: boolean;
   teamsSelected: boolean;
@@ -134,6 +156,7 @@ export function PromptInputFooterLeftSide({
   toolPermissionContext,
   suppressHint,
   isLoading,
+  messages,
   tasksSelected,
   teamsSelected,
   tmuxSelected,
@@ -177,6 +200,7 @@ export function PromptInputFooterLeftSide({
         toolPermissionContext={toolPermissionContext}
         showHint={!suppressHint && !showVim}
         isLoading={isLoading}
+        messages={messages}
         tasksSelected={tasksSelected}
         teamsSelected={teamsSelected}
         teammateFooterIndex={teammateFooterIndex}
@@ -192,6 +216,7 @@ type ModeIndicatorProps = {
   toolPermissionContext: ToolPermissionContext;
   showHint: boolean;
   isLoading: boolean;
+  messages: Message[];
   tasksSelected: boolean;
   teamsSelected: boolean;
   tmuxSelected: boolean;
@@ -204,6 +229,7 @@ function ModeIndicator({
   toolPermissionContext,
   showHint,
   isLoading,
+  messages,
   tasksSelected,
   teamsSelected,
   tmuxSelected,
@@ -274,6 +300,7 @@ function ModeIndicator({
   }, [voiceEnabled, voiceHintUnderCap]);
   const isKillAgentsConfirmShowing = useAppState(s => s.notifications.current?.key === 'kill-agents-confirm');
   const rssState = useRssDisplay();
+  const ctxState = useContextDisplay(messages);
 
   // Derive team info from teamContext (no filesystem I/O needed)
   // Match the same logic as TeamStatus to avoid trailing separator
@@ -367,6 +394,18 @@ function ModeIndicator({
             color={rssState.level === 'error' ? 'error' : rssState.level === 'warning' ? 'warning' : undefined}
           >
             {rssState.text} · pid:{process.pid}
+          </Text>,
+        ]
+      : []),
+    // Context window usage — updates dynamically after each message
+    ...(ctxState
+      ? [
+          <Text
+            key="ctx"
+            dimColor={ctxState.level === 'normal'}
+            color={ctxState.level === 'error' ? 'error' : ctxState.level === 'warning' ? 'warning' : undefined}
+          >
+            {ctxState.text}
           </Text>,
         ]
       : []),

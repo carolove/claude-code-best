@@ -166,6 +166,7 @@ function PromptInputFooter({
             toolPermissionContext={toolPermissionContext}
             suppressHint={suppressHint}
             isLoading={isLoading}
+            messages={messages}
             tasksSelected={pillSelected}
             teamsSelected={teamsSelected}
             teammateFooterIndex={teammateFooterIndex}
